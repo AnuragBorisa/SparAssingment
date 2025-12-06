@@ -1,6 +1,6 @@
 # Node.js Order Management API
 
-A small but production-style Node.js API for managing **users, products, orders, and payments**, built as a take-home assignment.
+Node.js API for managing **users, products, orders, and payments**, 
 
 * Runtime: **Node.js + Express (ES modules)**
 * Auth: **JWT** with role-based access (`admin`, `customer`, `seller`)
