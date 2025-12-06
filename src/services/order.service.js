@@ -11,6 +11,8 @@ import { ApiError } from '../utils/ApiError.js';
 import { ERROR_CODES, ORDER_STATUS, ROLES } from '../utils/constants.js';
 import { getPagination } from '../utils/pagination.js';
 import { refundIfPaidForOrder } from '../services/payment.service.js';
+import { findById as findUserById } from '../repositories/user.repository.js';
+
 
 
 
@@ -44,6 +46,78 @@ const calculateTotals = (itemsWithPrice) => {
     grandTotal,
   };
 };
+
+const buildOrderFilter = (query) => {
+  const { status, dateFrom, dateTo, minTotal, maxTotal } = query;
+
+  const statusFilter = status ? String(status) : null;
+  const min = minTotal !== undefined ? Number(minTotal) : null;
+  const max = maxTotal !== undefined ? Number(maxTotal) : null;
+  const fromDate = dateFrom ? new Date(dateFrom) : null;
+  const toDate = dateTo ? new Date(dateTo) : null;
+
+  return (o) => {
+    if (statusFilter && o.status !== statusFilter) return false;
+
+    if (fromDate && o.createdAt < fromDate) return false;
+    if (toDate && o.createdAt > toDate) return false;
+
+    if (min !== null && o.totals?.grandTotal < min) return false;
+    if (max !== null && o.totals?.grandTotal > max) return false;
+
+    return true;
+  };
+};
+
+const applySearchAndSort = (orders, query, isAdminOrSeller) => {
+  const search = query.search ? String(query.search).toLowerCase() : null;
+  const sortBy = query.sortBy || 'createdAt';
+  const sortOrder = (query.order || 'desc').toLowerCase() === 'asc' ? 1 : -1;
+
+  let filtered = orders;
+
+  
+  if (search) {
+    filtered = filtered.filter(o => {
+      const idMatch = o.id.toLowerCase().includes(search);
+      if (idMatch) return true;
+
+      if (!isAdminOrSeller) return false;
+
+      const customer = findUserById(o.userId);
+      if (!customer) return false;
+
+      const name = (customer.name || '').toLowerCase();
+      const email = (customer.email || '').toLowerCase();
+
+      return name.includes(search) || email.includes(search);
+    });
+  }
+
+  const getSortValue = (o) => {
+    if (sortBy === 'total' || sortBy === 'grandTotal') {
+      return o.totals?.grandTotal || 0;
+    }
+    return o[sortBy]; 
+  };
+
+  filtered.sort((a, b) => {
+    const valA = getSortValue(a);
+    const valB = getSortValue(b);
+
+    if (valA == null && valB == null) return 0;
+    if (valA == null) return -1 * sortOrder;
+    if (valB == null) return 1 * sortOrder;
+
+    if (valA < valB) return -1 * sortOrder;
+    if (valA > valB) return 1 * sortOrder;
+    return 0;
+  });
+
+  return filtered;
+};
+
+
 
 const validateAndPrepareItems = (items) => {
   if (!Array.isArray(items) || items.length === 0) {
@@ -151,36 +225,23 @@ export const createOrderService = ({ user, items, shippingAddress, paymentMethod
 
 export const getOrdersForUserService = (user, query) => {
   const { page, limit, skip } = getPagination(query);
-  const { status, dateFrom, dateTo, minTotal, maxTotal } = query;
-
-  const statusFilter = status ? String(status) : null;
-  const min = minTotal !== undefined ? Number(minTotal) : null;
-  const max = maxTotal !== undefined ? Number(maxTotal) : null;
-  const fromDate = dateFrom ? new Date(dateFrom) : null;
-  const toDate = dateTo ? new Date(dateTo) : null;
-
-  const filterFn = (o) => {
-    if (statusFilter && o.status !== statusFilter) return false;
-
-    if (fromDate && o.createdAt < fromDate) return false;
-    if (toDate && o.createdAt > toDate) return false;
-
-    if (min !== null && o.totals?.grandTotal < min) return false;
-    if (max !== null && o.totals?.grandTotal > max) return false;
-
-    return true;
-  };
+  const filterFn = buildOrderFilter(query);
 
   let all;
   if (user.role === ROLES.CUSTOMER) {
     all = findOrdersByUserId(user.id, filterFn);
   } else {
-   
+    
     all = findAllOrders(filterFn);
   }
 
-  const total = all.length;
-  const items = all.slice(skip, skip + limit);
+  const isAdminOrSeller =
+    user.role === ROLES.ADMIN || user.role === ROLES.SELLER;
+
+  const ordered = applySearchAndSort(all, query, isAdminOrSeller);
+
+  const total = ordered.length;
+  const items = ordered.slice(skip, skip + limit);
 
   return {
     items,
@@ -192,6 +253,31 @@ export const getOrdersForUserService = (user, query) => {
     },
   };
 };
+
+
+export const getOrdersForSpecificUserService = (adminUser, targetUserId, query) => {
+  const { page, limit, skip } = getPagination(query);
+  const filterFn = buildOrderFilter(query);
+
+  const all = findOrdersByUserId(targetUserId, filterFn);
+  const ordered = applySearchAndSort(all, query, true);
+
+  const total = ordered.length;
+  const items = ordered.slice(skip, skip + limit);
+
+  return {
+    items,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+  };
+};
+
+
+
 
 export const getOrderByIdService = (user, orderId) => {
   const order = findOrderById(orderId);
@@ -205,6 +291,32 @@ export const getOrderByIdService = (user, orderId) => {
 
   return order;
 };
+
+export const getOrderInvoiceService = (user, orderId) => {
+
+  const order = getOrderByIdService(user, orderId);
+
+  const customer = findUserById(order.userId);
+
+
+  return {
+    invoiceId: `INV-${order.id}`,
+    orderId: order.id,
+    status: order.status,
+    createdAt: order.createdAt,
+    customer: customer
+      ? {
+          id: customer.id,
+          name: customer.name,
+          email: customer.email,
+        }
+      : null,
+    items: order.items,          
+    totals: order.totals,        
+    shippingAddress: order.shippingAddress,
+  };
+};
+
 
 export const updateOrderStatusService = (user, orderId, newStatus) => {
   const order = findOrderById(orderId);

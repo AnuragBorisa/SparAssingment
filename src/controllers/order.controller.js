@@ -7,6 +7,7 @@ import {
   cancelOrderService,
   bulkCreateOrdersService,
   getSummaryStatsService,
+  getOrderInvoiceService,
 } from '../services/order.service.js';
 
 import { success } from '../utils/response.js';
@@ -42,6 +43,17 @@ export const getOrderByIdController = (req, res, next) => {
     next(err);
   }
 };
+export const getOrderInvoiceController = (req, res, next) => {
+  try {
+    const user = req.user;
+    const { id } = req.params;
+    const invoice = getOrderInvoiceService(user, id);
+    return success(res, invoice);
+  } catch (err) {
+    next(err);
+  }
+};
+
 
 export const updateOrderStatusController = (req, res, next) => {
   try {

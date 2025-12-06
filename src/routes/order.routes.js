@@ -12,6 +12,7 @@ import {
   cancelOrderController,
   bulkCreateOrdersController,
   summaryStatsController,
+  getOrderInvoiceController,
 } from '../controllers/order.controller.js';
 
 import {
@@ -40,6 +41,11 @@ router.get(
   listOrdersController
 );
 
+router.get(
+  '/:id/invoice',
+  authenticateToken,
+  getOrderInvoiceController
+);
 
 router.get(
   '/:id',
